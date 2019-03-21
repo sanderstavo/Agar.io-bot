@@ -1285,4 +1285,4 @@ if ( typeof window.updateBotList == 'function' ) {
     window.updateBotList(); //This function might not exist yet.
 } else {
     window.log("The launcher is not yet started.");
-}
+
