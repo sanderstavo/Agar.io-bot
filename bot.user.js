@@ -1,1288 +1,815 @@
-/*The MIT License (MIT)
-
-Copyright (c) 2015 Apostolique
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.*/
-
 // ==UserScript==
-// @name        AposBot
-// @namespace   AposBot
-// @include     http://agar.io/*
-// @version     3.651
-// @grant       none
-// @author      http://www.twitch.tv/apostolique
+// @name         EvoNetwork Agar Bots
+// @namespace    Copyright Â© evonetwork.net
+// @version      0.2
+// @description  Bots for agar.io
+// @author       Varedz
+// @require      https://code.jquery.com/jquery-3.1.1.min.js
+// @match        *://agar.io/*
+// @run-at       document-start
+// @grant        none
+// @downloadURL http://www.evonetwork.net/userscript.js
+// @updateURL http://www.evonetwork.net/userscript.js
 // ==/UserScript==
 
-var aposBotVersion = 3.651;
-
-//TODO: Team mode
-//      Detect when people are merging
-//      Split to catch smaller targets
-//      Angle based cluster code
-//      Better wall code
-//      In team mode, make allies be obstacles.
-
-/*
-Number.prototype.mod = function(n) {
-    return ((this % n) + n) % n;
-};
-*/
-
-Array.prototype.peek = function() {
-    return this[this.length - 1];
-};
-
-//Load it from the two file in case one is not loaded
-window.log = function(message){
-    if(window.logDebugging === true){
-        console.log.apply(console, arguments);
+var $ = window.jQuery;
+window.xt = false;
+window.serverReady = false;
+window.botmodeChange = false;
+window.botmode = 0;
+window.leaderBoard = {};
+window.clientname = null;
+window.ab = false;
+window.ServerSwitching = false;
+window.CurrentServerPlaying = null;
+var waitUntilLoaded = null;
+waitUntilLoaded = setInterval(function() {
+    if($('#chv2_main-container').length > 0) {
+        console.log("Loaded ext");
+        refresh();
+        clearInterval(waitUntilLoaded);
     }
+}, 200);
+setInterval(function(){
+    if (window.CurrentServerPlaying != null && window.client.currentServer != window.CurrentServerPlaying)
+    {
+        window.client._ws.close();
+        window.ServerSwitching = true;
+        window.CurrentServerPlaying = window.client.currentServer;
+        window.botmodeChange = false;
+    }
+},70);
+setInterval(function(){
+    if($('#mainui-app').css('display') == 'block') {
+          var nameIG = document.querySelector('#nick') !== null;
+          if (nameIG)
+          {
+              window.clientname = document.querySelectorAll('#nick')[0].value;
+          }
+    }
+},50);
+setInterval(function() {
+        //Search if party is on
+        if($('#overlays').css('display') == 'block') {
+            freezeOwnCell(false);
+        }
+},1000);
+var percentColors = [
+    { pct: 0.0, color: { r: 0xff, g: 0x00, b: 0 } },
+    { pct: 0.5, color: { r: 0xff, g: 0xff, b: 0 } },
+    { pct: 1.0, color: { r: 0x00, g: 0xff, b: 0 } } ];
+var getColorForPercentage = function(pct) {
+    for (var i = 1; i < percentColors.length - 1; i++) {
+        if (pct < percentColors[i].pct) {
+            break;
+        }
+    }
+    var lower = percentColors[i - 1];
+    var upper = percentColors[i];
+    var range = upper.pct - lower.pct;
+    var rangePct = (pct - lower.pct) / range;
+    var pctLower = 1 - rangePct;
+    var pctUpper = rangePct;
+    var color = {
+        r: Math.floor(lower.color.r * pctLower + upper.color.r * pctUpper),
+        g: Math.floor(lower.color.g * pctLower + upper.color.g * pctUpper),
+        b: Math.floor(lower.color.b * pctLower + upper.color.b * pctUpper)
+    };
+    return 'rgb(' + [color.r, color.g, color.b].join(',') + ')';
 }
-
-var sha = "efde0488cc2cc176db48dd23b28a20b90314352b";
-(function () {
-    window.jQuery.ajax({
-            url: "https://api.github.com/repos/apostolique/Agar.io-bot/git/refs/heads/master",
-            cache: false,
-            dataType: "jsonp"
-        }).done(function(data) {
-            console.dir(data.data);
-            window.log("hmm: " + data.data.object.sha);
-            sha = data.data.object.sha;
-
-            function update(prefix, name, url) {
-                window.jQuery(document.body).prepend("<div id='" + prefix + "Dialog' style='position: absolute; left: 0px; right: 0px; top: 0px; bottom: 0px; z-index: 100; display: none;'>");
-                window.jQuery('#' + prefix + 'Dialog').append("<div id='" + prefix + "Message' style='width: 350px; background-color: #FFFFFF; margin: 100px auto; border-radius: 15px; padding: 5px 15px 5px 15px;'>");
-                window.jQuery('#' + prefix + 'Message').append("<h2>UPDATE TIME!!!</h2>");
-                window.jQuery('#' + prefix + 'Message').append("<p>Grab the update for: <a id='" + prefix + "Link' href='" + url + "' target=\"_blank\">" + name + "</a></p>");
-                window.jQuery('#' + prefix + 'Link').on('click', function() {
-                    window.jQuery("#" + prefix + "Dialog").hide();
-                    window.jQuery("#" + prefix + "Dialog").remove();
-                });
-                window.jQuery("#" + prefix + "Dialog").show();
+var refresh = function(){
+            if($('#chv2_main-container').length == 2) {
+                return;
             }
-
-            $.get('https://raw.githubusercontent.com/Apostolique/Agar.io-bot/master/bot.user.js?' + Math.floor((Math.random() * 1000000) + 1), function(data) {
-                var latestVersion = data.replace(/(\r\n|\n|\r)/gm,"");
-                latestVersion = latestVersion.substring(latestVersion.indexOf("// @version")+11,latestVersion.indexOf("// @grant"));
-
-                latestVersion = parseFloat(latestVersion + 0.0000);
-                var myVersion = parseFloat(aposBotVersion + 0.0000);
-
-                if(latestVersion > myVersion)
+    		var t = window.client.lastmessage;
+    		if(t == undefined)
+            {
+    			return;
+            }
+    		if(t.nope){
+                window.serverReady = true;
+                var htmlAppend = '';
+                htmlAppend = '<div class="chv2_expire_pkgexp chv2_expire"><p>No active plan</p></div>';
+                htmlAppend += '<div class="chv2_expire_chgip chv2_expire"><p><a href="http://evonetwork.net" target="_blank"><b>Active plan ?</b><br>change your ip !</a></p></div>';
+                document.getElementById('chv2_main-container').innerHTML = htmlAppend;
+    		} else if(t.alreadyConnected){
+                window.serverReady = true;
+                htmlAppend = '';
+                htmlAppend = '<div class="chv2_expire_pkgexp chv2_expire"><p>Already on another game (refresh page)</p></div>';
+                htmlAppend += '<div class="chv2_expire_chgip chv2_expire"><p><a href="http://evonetwork.net" target="_blank"><b>Active plan ?</b><br>change your ip !</a></p></div>';
+                document.getElementById('chv2_main-container').innerHTML = htmlAppend;
+    		} else if(t.special != undefined){
+                var evonetwork = "Out Of Time! Get more time from evonetwork.net!";
+                window.serverReady = true;
+                htmlAppend = '';
+                htmlAppend = '<div class="chv2_expire_pkgexp chv2_expire"><p>'+evonetwork+'</p></div>';
+                htmlAppend += '<div class="chv2_expire_chgip chv2_expire"><p>'+evonetwork+'</p></div>';
+                document.getElementById('chv2_main-container').innerHTML = htmlAppend;
+    		} else{
+                if(window.loadingset == undefined)
                 {
-                    update("aposBot", "bot.user.js", "https://github.com/Apostolique/Agar.io-bot/blob/" + sha + "/bot.user.js/");
+                htmlAppend = '';
+                htmlAppend += '<div class="chv2_active_botsnb chv2_active"><p id="chv2_active_botsnb_ok">Bots: <span id="chv2_numeric_bot_load">'+t.currentBots+'</span> / '+t.maxBots+'<br><span class="chv2_small">bots alive<span id="chv2_agario_srvfull"></span></span>';
+                htmlAppend += '<span style="width: 0%;" id="chv2_bot_load"></span>';
+                htmlAppend += '<p id="chv2_active_botsnb_ko" style="background-color: rgba(255,0,0,0.5);display: none;padding-top: 12px;"></p>';
+                htmlAppend += '</div>';
+                htmlAppend += '<div class="chv2_active_followcmd chv2_active"><p style="">Split<br><span class="chv2_small">Key: X</span></p></div>';
+                htmlAppend += '<div class="chv2_active_speedcmd chv2_active"><p style="">Feed<br><span class="chv2_small">Key: C</span></p></div>';
+                htmlAppend += '<div class="chv2_active_randomcmd chv2_active"><p style="">Freeze<br><span class="chv2_small">key: V</span></p></div>';
+                htmlAppend += '<div class="chv2_active_botmode chv2_active"><p style=""><span id="botmode">NORMAL</span><br><span class="chv2_small">Key: <span class="KEYBINDING_BOT_MODE">M</span> (mode)</span></p></div>';
+                htmlAppend += '<div class="chv2_active_expire chv2_active"><p><span id="chv2_expire_time"></span>';
+                htmlAppend += '<br><span class="chv2_small">Remain time</span> </p></div>';
+                    document.getElementById('chv2_main-container').innerHTML = htmlAppend;
+                    window.loadingset = true;
+                    window.expire = t.expire;
+                    var expire = new Date(t.expire);
                 }
-                window.log('Current bot.user.js Version: ' + myVersion + " on Github: " + latestVersion);
-            });
+                else
+                {
+                    $('#chv2_active_botsnb_ok').html('Bots: <span id="chv2_numeric_bot_load">'+t.currentBots+'</span> / '+t.maxBots+'<br><span class="chv2_small">bots alive<span id="chv2_agario_srvfull"></span></span><span style="width: 0%;" id="chv2_bot_load"></span>');
+                    var botLoadPct = Math.floor((t.currentBots / t.maxBots) * 100);
+                    $('#chv2_bot_load').css('width', botLoadPct+'%');
+                    $('#chv2_bot_load').css('background-color', getColorForPercentage(botLoadPct/100));
+                }
+    		}
+    		showRemaining();
+};
+    	var _second = 1000;
+        var _minute = _second * 60;
+        var _hour = _minute * 60;
+        var _day = _hour * 24;
+    	function showRemaining() {
+    		if(document.getElementById('chv2_expire_time') == undefined)
+            {
+    			return;
+            }
+    		if(window.expire == undefined || window.expire == 0)
+            {
+    			return;
+            }
+    		var now = new Date();
+            var distance = new Date(window.expire) - now;
+            if (distance < 0) {
+                document.getElementById('chv2_expire_time').innerHTML = 'EXPIRED!';
+                return;
+            }
+            var days = Math.floor(distance / _day);
+            var hours = Math.floor((distance % _day) / _hour);
+            var minutes = Math.floor((distance % _hour) / _minute);
+            var seconds = Math.floor((distance % _minute) / _second);
+            document.getElementById('chv2_expire_time').innerHTML = days + 'days ';
+            document.getElementById('chv2_expire_time').innerHTML += hours + 'hrs ';
+            document.getElementById('chv2_expire_time').innerHTML += minutes + 'mins ';
+            document.getElementById('chv2_expire_time').innerHTML += seconds + 'secs';
+}
+var timer = setInterval(function(){
+   showRemaining();
+},1000);
+setInterval(function()
+{
+        if (CanvasRenderingContext2D.prototype.v18_fillText == undefined)
+        {
+            CanvasRenderingContext2D.prototype.v18_fillText = CanvasRenderingContext2D.prototype.fillText;
+            setInterval(function(){
+                CanvasRenderingContext2D.prototype.fillText = function() {
+                    this.v18_fillText.apply(this, arguments);
+                    if(arguments[0] == "Leaderboard") {
+                        window.leaderBoard = {};
+                    }
+                    if(parseInt(arguments[0].substr(0, 1)) > 0 && parseInt(arguments[0].substr(0, 1)) <= 9 && arguments[0].substr(1, 1) == '.') {
+                        window.leaderBoard[parseInt(arguments[0].substr(0, 1))] = arguments[0].substr(2).trim();
+                    } else if(parseInt(arguments[0].substr(0, 2)) == 10 && arguments[0].substr(2, 1) == '.') {
+                        window.leaderBoard[10] = arguments[0].substr(3).trim();
+                    }
+                }
+                if (window.xt)
+                    {
+                	    var e = {};
+                        e.action = 4;
+                        e.leaderBoard = window.leaderBoard;
+                        window.client._ws.send(JSON.stringify(e));
+                    }
+            }, 1000);
+        }
+},1000);
+class GUITweaker {
+	constructor() {
+		this.removeStartupBackground();
+		this.removeElements();
+        this.addGUI();
+		this.addBotGUI();
+        this.addsetNick();
+	}
 
-        }).fail(function() {});
-})();
+	removeStartupBackground() {
+		const oldEvt = CanvasRenderingContext2D.prototype.drawImage;
+		CanvasRenderingContext2D.prototype.drawImage = function (a) {
+			if (a.src && a.src == 'https://agar.io/img/background.png') return;
+			oldEvt.apply(this, arguments);
+		};
+	}
+    addsetNick()
+    {
+       if(typeof(window.core) != 'undefined' && typeof(window.MC.onPlayerSpawn) != 'undefined'&& typeof(window.MC._onPlayerSpawn) == 'undefined') {
+            window.MC._onPlayerSpawn = window.MC.onPlayerSpawn;
+            window.MC.onPlayerSpawn = function()
+                 {
+                      if (window.xt)
+                      {
+                          window.botmodeChange = true;
+                          window.CurrentServerPlaying = window.client.currentServer;
+                          var e = {};
+                          e.action = 1;
+                          e.clientname = window.clientname;
+                          e.targetIp = window.client.currentServer;
+                          e.ao = window.ao;
+                          if (window.client.currentServer.indexOf("?party_id=") !== -1)
+                          {
+                              e.targetRoom = "#8LAWM8";
+                          }
+                          else
+                          {
+                             e.targetRoom = "";
+                          }
+                          window.client._ws.send(JSON.stringify(e));
+                          e = {};
+                          e.action = 3;
+                          window.client._ws.send(JSON.stringify(e));
+                          console.log("PlayerSpawn");
+                          window.MC.onPlayerSpawn;
+                      }
+                 }
+           }
+    }
+	removeElements() {
+		$('#advertisement').remove();
+		$('#bannerCarousel').remove();
+	}
+addBotGUI() {
+        //Generate static map grid
+        var htmlToInject = '';
+        htmlToInject += '<div id="chv2_staticmap" style="">';
+        var gridAlphabet = ['A', 'B', 'C', 'D', 'E', 'F'];
+        for(var mapX = 0;mapX < 6; mapX++) {
+            for(var mapY = 1;mapY<7;mapY++) {
+                htmlToInject += '<div class="grid">'+gridAlphabet[mapX]+mapY+' </div>';
+            }
+        }
+        htmlToInject += '<div class="presshelp">press A to hide</div>';
+        htmlToInject += '<div id="pointer"></div>';
+        htmlToInject += '<div id="pointer2"></div>';
+        htmlToInject += '</div>';
+        htmlToInject += '<div id="chv2_staticmaphide">press A to show</div>';
+        htmlToInject += '<div id="chv2_freeze_mouse_overlay" style="width: 100%;height: 100%;top:0;left:0;position: fixed;z-index: 199;display: none;"></div>';
+        var cLCOMdiv = document.createElement("div");
+        cLCOMdiv.innerHTML = htmlToInject;
+        document.getElementsByTagName('body')[0].appendChild(cLCOMdiv);
+	}
+addGUI() {
+    $('body').append(`
+<style>
+#chithercomUI2 {
+    font-family: 'Lucida Sans Unicode', 'Lucida Grande', sans-serif;
+    height: 50px!important;
+    background-color: rgba(20,20,20, 0.2);
+    position: fixed;
+    top: 0;
+	width: calc(100% - 20%);
+    left: 0px;
+    z-index: 9999999;
+    color: #dddddd!important;
+    font-size: 14px!important;
+    text-align: left!important;
+    line-height: 18px!important;
+    box-sizing: border-box;
+	display: inline-flex;
+}
+#chithercomUI2 .chv2_logo {
+    cursor: pointer;
+    text-transform: uppercase;
+    width: 110px;
+    height: 33px;
+    display: inline-block;
+    vertical-align: top;
+    margin-left: 10px;
+    margin-right: 10px;
+	margin-top: 7px;
+}
+#chithercomUI2 .chv2_logo_free {
+    background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAJYAAAAyCAYAAAC+jCIaAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAA2RpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADw/eHBhY2tldCBiZWdpbj0i77u/IiBpZD0iVzVNME1wQ2VoaUh6cmVTek5UY3prYzlkIj8+IDx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IkFkb2JlIFhNUCBDb3JlIDUuMC1jMDYwIDYxLjEzNDc3NywgMjAxMC8wMi8xMi0xNzozMjowMCAgICAgICAgIj4gPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4gPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIgeG1sbnM6eG1wTU09Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9tbS8iIHhtbG5zOnN0UmVmPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvc1R5cGUvUmVzb3VyY2VSZWYjIiB4bWxuczp4bXA9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC8iIHhtcE1NOk9yaWdpbmFsRG9jdW1lbnRJRD0ieG1wLmRpZDo5M0VFQUIxN0M5MTZFNjExOTZFRTg0QjYxMUJDNjg1QiIgeG1wTU06RG9jdW1lbnRJRD0ieG1wLmRpZDo4MjZCRjU4RDFGOTgxMUU2QTU4NTk5QUQ0RDgwNzlBOCIgeG1wTU06SW5zdGFuY2VJRD0ieG1wLmlpZDo4MjZCRjU4QzFGOTgxMUU2QTU4NTk5QUQ0RDgwNzlBOCIgeG1wOkNyZWF0b3JUb29sPSJBZG9iZSBQaG90b3Nob3AgQ1M1IFdpbmRvd3MiPiA8eG1wTU06RGVyaXZlZEZyb20gc3RSZWY6aW5zdGFuY2VJRD0ieG1wLmlpZDpERTIwMDM5Rjk3MUZFNjExOUQ5Rjk3OTAyRTFGRTcyMCIgc3RSZWY6ZG9jdW1lbnRJRD0ieG1wLmRpZDo5M0VFQUIxN0M5MTZFNjExOTZFRTg0QjYxMUJDNjg1QiIvPiA8L3JkZjpEZXNjcmlwdGlvbj4gPC9yZGY6UkRGPiA8L3g6eG1wbWV0YT4gPD94cGFja2V0IGVuZD0iciI/PlgpdkgAAALJSURBVHja7JzxkeIgFIejYwO2wJXglZAtYbeEWIJXgpagJWxK0BLOEkwLqeAmhzM4w72FBKKB7Nz3zbx/BAThx3sPknHRdV0B8GqWTAEgLEBYgLAAEBYgLEBYAAgLEBYgLACEBQgLEBZAEmHd33xwWKXt3P1LZcqU+Pwm2h5F+U6USx6f77owlKefyvou1dOPq23XM2bVU+8+R+9y/v4XVhF119o+tZWOsg179AulsVrbBx7Lz9kjKujnXdveW/pncdPWDdhOW2Gsr/7N1FVWfWmx/YW3GSGsPV7pKXbG40+NMmt1M33O2mOp3IP8RjTa9BYvto6yKvFY9sZbzlZYrgm5avtpJtE3ka/kYPV1EWVbq6yZoG/7+xdmLEOcTG4lc9TUHDP1GyQsqfpW25sRF/i5jhTWRQh5SMyP+h9mbWSf5Yv7C2ozJCxlTHqPFt0EnaJTUnsEoebosZRHrTHJZGdZlWmRj9YYbgnaVo68tEnwO2cTRVaRwmoJgUEbyedRcnjJJsdExD7SIQSOD1OhC1wKLx/qJV33ZW1AhBnT32CbFWueJDxNeWoue7xktnw41mOt0UkvjcMzbTMt7iHwaiSLsBqHsNaRE20fSU+Zfqd9F/Vj4ra1I0RN7RFbx7z/yrnDlgGDdp14wM/lSWHJO6IhMbeODasi+o3tL6jNMmDQV4ewCIn9k96KRZ76Oetpbg4gJMeqHbvhbE3WPXnkWWL/Qk8dDhuHpyyLTJejY4VVGFH9NqeRc84fkICjOFqHbKKrY5FTXGkUiQX9lLCyJ4LfkFqEw02icCiT+JBNIO+kQjbPYJvQ64ZDwY37sx4khdc6OE7xWXKtmHustyLuOSFJfPqwNJtwGCOsx+syWzFpLYILOh1uEuSiviQ++du/C/6DFHJ7LACEBQgLEBYAwgKEBQgLAGEBwgKEBYCwAGEBwgLo5a8AAwCTLhdsLUxn1gAAAABJRU5ErkJggg==')!important;
+}
+#chithercomUI2 a {
+    color: #66e48c!important;
+    text-decoration: none!important;
+}
+#chithercomUI2 br {
+    display: block!important;
+    height: 0!important;
+    margin: 0px 0!important;
+}
+#chithercomUI2 .small {
+    font-size: 12px!important;
+    color: #cccccc;
+}
+#chv2_main-container {
+    height: 50px;
+    width: calc(100% - 215px);
+    box-sizing: content-box!important;
+    display: inline-block;
+    vertical-align: top;
+}
+.chv2_signletext {
+    text-align: center;
+    margin-top: 13px!important;
+}
+#chithercomUI2 .chv2_expire {
+    width: 32%;
+    height: 50px;
+    display: inline-block;
+    text-align: center;
+    vertical-align: top;
+    box-sizing: border-box;
+    font-size: 15px;
+}
+#chithercomUI2 .chv2_expire p {
+    line-height: 20px;
+    margin-top: 6px;
+}
+#chithercomUI2 .chv2_expire p b {
+    font-size: 20px;
+}
+#chithercomUI2 .chv2_expire_pkgexp p {
+    margin-top: 9px;
+    display: block;
+    background-color: rgba(255, 0, 0, 0.5);
+    border-radius: 4px;
+    padding: 6px;
+    font-size: 18px;
+}
+#chithercomUI2 .chv2_active {
+    text-align: center;
+    height: 50px;
+    display: inline-block;
+    vertical-align: top;
 
-window.log("Running Apos Bot!");
-
-var f = window;
-var g = window.jQuery;
-
-
-window.log("Apos Bot!");
-
-window.botList = window.botList || [];
-
-/*function QuickBot() {
-    this.name = "QuickBot V1";
-    this.customParameters = {};
-    this.keyAction = function(key) {};
-    this.displayText = function() {return [];};
-    this.mainLoop = function() {
-        return [screenToGameX(getMouseX()),
-                screenToGameY(getMouseY())];
-    };
+}
+#chithercomUI2 .chv2_active_botsnb {
+    width: 20%;
+}
+#chithercomUI2 .chv2_active_expire {
+	width: 32%;
 }
 
-window.botList.push(new QuickBot());*/
+#chithercomUI2 .chv2_active_botmode,
+#chithercomUI2 .chv2_active_followcmd,
+#chithercomUI2 .chv2_active_speedcmd,
+#chithercomUI2 .chv2_active_randomcmd {
+    width: 12%;
+}
 
-function AposBot() {
-    this.name = "AposBot " + aposBotVersion;
+#chithercomUI2 .chv2_active p {
+    background-color: rgba(0,0,0, 0.5);
+    border-radius: 4px;
+    display: block;
+    height: 40px;
+    margin-top: 5px;
+    margin-left: 2.5px;
+    margin-right: 2.5px;
+    margin-bottom: 0;
+    font-size: 17px;
+    line-height: 16px;
+    padding-top: 4px;
+    box-sizing: border-box;
+    position: relative;
+}
+#chithercomUI2 .chv2_active p .chv2_small {
+    font-size: 12px;
+}
 
-    this.toggleFollow = false;
-    this.keyAction = function(key) {
-        if (key.keyCode === 81) {
-            window.log("Toggle Follow Mouse!");
-            this.toggleFollow = !this.toggleFollow;
-        }
-    };
+#chithercomUI2 #chv2_bot_load {
+    position: relative;
+    bottom: -2px;
+    left: 0px;
+    width: 0%;
+    height: 2px;
+    background-color: #00ff00;
+    display: block;
+    border-radius: 4px;
+    -webkit-transition: width 2s;
+    -moz-transition: width 2s;
+    -o-transition: width 2s;
+    transition: width 2s;
+}
 
-    this.displayText = function() {
-        return ["Q - Follow Mouse: " + (this.toggleFollow ? "On" : "Off")];
-    };
+#chithercomUI2 #chv2_message_container {
+    height: 22px;
+    position: relative;
+    bottom: 0;
+    color: #dddddd;
+    font-size: 14px;
+    text-align: center;
+    background-color: rgba(20,20,20, 0.8);
+    border-radius: 4px;
+    display: none;
+}
+#chithercomUI2 #chv2_message_container p {
+    margin-top: -6px;
+}
 
-    // Using mod function instead the prototype directly as it is very slow
-    this.mod = function(num, mod) {
-        if (mod & (mod - 1) === 0 && mod !== 0) {
-            return num & (mod - 1);
-        }
-        return num < 0 ? ((num % mod) + mod) % mod : num % mod;
-    };
-    this.splitDistance = 710;
-
-    this.isMerging = function(cell1, cell2) {
-        var dist = this.computeDistance(cell1.x, cell1.y, cell2.x, cell2.y, cell1.size, cell2.size);
-
-        //debug logging
-		window.log("Merge:", [cell1.x, cell1.y, cell2.x, cell2.y, cell1.size, cell2.size, dist].join(", "))
-
-        return dist <= -50;
-    };
-
-    //Given an angle value that was gotten from valueAndleBased(),
-    //returns a new value that scales it appropriately.
-    this.paraAngleValue = function(angleValue, range) {
-        return (15 / (range[1])) * (angleValue * angleValue) - (range[1] / 6);
-    };
-
-    this.getMass = function(size) {
-        return Math.pow(size / 10, 2);
-    };
-
-    this.valueAngleBased = function(angle, range) {
-        var leftValue = this.mod(angle - range[0], 360);
-        var rightValue = this.mod(this.rangeToAngle(range) - angle, 360);
-
-        var bestValue = Math.min(leftValue, rightValue);
-
-        if (bestValue <= range[1]) {
-            return this.paraAngleValue(bestValue, range);
-        }
-        return -1;
-    };
-
-    this.computeDistance = function(x1, y1, x2, y2, s1, s2) {
-        // Make sure there are no null optional params.
-        s1 = s1 || 0;
-        s2 = s2 || 0;
-        var xdis = x1 - x2; // <--- FAKE AmS OF COURSE!
-        var ydis = y1 - y2;
-        var distance = Math.sqrt(xdis * xdis + ydis * ydis) - (s1 + s2);
-
-        return distance;
-    };
-
-    // Get a distance that is Inexpensive on the cpu for various purpaces
-    this.computeInexpensiveDistance = function(x1, y1, x2, y2, s1, s2) {
-        // Make sure there are no null optional params.
-        s1 = s1 || 0;
-        s2 = s2 || 0;
-        var xdis = x1 - x2;
-        var ydis = y1 - y2;
-        // Get abs quickly
-        xdis = xdis < 0 ? xdis * -1 : xdis;
-        ydis = ydis < 0 ? ydis * -1 : ydis;
-
-        var distance = xdis + ydis;
-
-        return distance;
-    };
-
-    this.computeDistanceFromCircleEdgeDeprecated = function(x1, y1, x2, y2, s2) {
-        var tempD = this.computeDistance(x1, y1, x2, y2);
-
-        var offsetX = 0;
-        var offsetY = 0;
-
-        var ratioX = tempD / (x1 - x2);
-        var ratioY = tempD / (y1 - y2);
-
-        offsetX = x1 - (s2 / ratioX);
-        offsetY = y1 - (s2 / ratioY);
-
-        drawPoint(offsetX, offsetY, 5, "");
-
-        return this.computeDistance(x2, y2, offsetX, offsetY);
-    };
-
-    this.compareSize = function(player1, player2, ratio) {
-        if (player1.size * player1.size * ratio < player2.size * player2.size) {
-            return true;
-        }
-        return false;
-    },
-
-    this.canSplit = function(player1, player2) {
-        return this.compareSize(player1, player2, 2.8) && !this.compareSize(player1, player2, 20);
-    };
-
-    this.isItMe = function(player, cell) {
-        if (getMode() == ":teams") {
-            var currentColor = player[0].color;
-            var currentRed = currentColor.substring(1,3);
-            var currentGreen = currentColor.substring(3,5);
-            var currentBlue = currentColor.substring(5,7);
-
-            var currentTeam = this.getTeam(currentRed, currentGreen, currentBlue);
-
-            var cellColor = cell.color;
-
-            var cellRed = cellColor.substring(1,3);
-            var cellGreen = cellColor.substring(3,5);
-            var cellBlue = cellColor.substring(5,7);
-
-            var cellTeam = this.getTeam(cellRed, cellGreen, cellBlue);
-
-            if (currentTeam == cellTeam && !cell.isVirus()) {
-                return true;
-            }
-
-            window.log("COLOR: " + color);
-
-        } else {
-            for (var i = 0; i < player.length; i++) {
-                if (cell.id == player[i].id) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    };
-
-    this.getTeam = function(red, green, blue) {
-        if (red == "ff") {
-            return 0;
-        } else if (green == "ff") {
-            return 1;
-        }
-        return 2;
-    };
-
-    this.isFood = function(blob, cell) {
-        if (!cell.isVirus() && this.compareSize(cell, blob, 1.33) || (cell.size <= 13)) {
-            return true;
-        }
-        return false;
-    };
-
-    this.isThreat = function(blob, cell) {
-
-        if (!cell.isVirus() && this.compareSize(blob, cell, 1.30)) {
-            return true;
-        }
-        return false;
-    };
-
-    this.isVirus = function(blob, cell) {
-    if (blob == null) {
-        if (cell.isVirus()) {
-            return true;
-        } else {
-            return false;
-        }
+#chv2_staticmap {
+    width: 150px;
+    height: 170px;
+    background-color: rgba(0,0,0, 0.5);
+    position: fixed;
+    bottom: 5px;
+    right: 10px;
+    color: rgba(255, 255, 255, 0.5);
+    overflow: hidden;
+    line-height: 0;
+    z-index: 100;
+}
+#chv2_staticmap .grid {
+    display: inline-block;
+    width: 25px;
+    height: 25px;
+    border: 1px solid;
+    border-color: rgba(255, 255, 255, 0.5);
+    text-align: center;
+    padding-top: 10px;
+    font-size: 10px;
+    margin: 0!important;
+    box-sizing: border-box;
+    margin-top: -100px;
+}
+#chv2_staticmap .presshelp {
+    text-align: center;
+    line-height: 20px;
+    font-size: 12px;
+}
+#chv2_staticmap #pointer {
+    background-color: #ff0000;
+    position: absolute;
+    top: calc(75px - 5px);
+    left: calc(75px - 5px);
+    width: 10px;
+    height: 10px;
+    border-radius: 10px;
+}
+#chv2_staticmap #pointer2 {
+    background-color: #ffff00;
+    position: absolute;
+    top: calc(75px - 3px);
+    left: calc(75px - 3px);
+    width: 6px;
+    height: 6px;
+    border-radius: 6px;
+}
+#chv2_staticmaphide {
+    text-align: center;
+    height: 22px;
+    width: 150px;
+    color: rgba(255, 255, 255, 0.5);
+    position: fixed;
+    bottom: 40px;
+    right: 10px;
+    display: none;
+    z-index: 100;
+}
+#chv2_advert {
+    text-align: center;
+    background-color: rgba(20, 20, 20, 0.8);
+    height: 20px;
+    line-height: 21px;
+    display: none;
+}
+#chv2_advert p {
+    font-size: 14px;
+    margin: 0;
+}
+#chv2_advert p .red {
+    color: #ff0000;
+}
+#chv2_advert p .orange {
+    color: #ffff00;
+}
+@media screen and (max-width: 1100px) {
+        #chv2_staticmap, #chv2_staticmaphide {
+        width: 0px;
+        height: 0px;
     }
-    if (cell.isVirus() && this.compareSize(cell, blob, 1.1)) {
-        return true;
-    } else if (cell.isVirus() && cell.color.substring(3, 5).toLowerCase() != "ff") {
-        return true;
+}
+</style>
+<div id="chithercomUI2">
+<a href="http://evonetwork.net/" target="_blank" class="chv2_logo"></a>
+<div id="chv2_main-container"><p class="chv2_signletext">Connecting to server...</p></div>
+<div id="chv2_message_container"></div>
+<div id="chv2_advert"><p></p></div>
+</div>
+`);
+	}
+}
+class Client {
+	constructor(botServerIP) {
+        this.lastmessage = null;
+		this.botServerIP = botServerIP;
+		this._ws = null;
+		this.moveInterval = 0;
+		this.clientX = 0;
+		this.clientY = 0;
+        this.mapOffsetX = 0;
+        this.mapOffsetY = 0;
+        this.mapOffset=7071.0678;
+        this.mouseAbsoluteX= 0;
+        this.mouseAbsoluteY= 0;
+        this.playerAbsoluteX= 0;
+        this.playerAbsoluteY = 0;
+        this.viewScaleMultiplier = 1;
+        this.playerX = 0;
+        this.playerY = 0;
+		this.currentServer = '';
+		this.serverInUse = false;
+		this.validated = false;
+		this.connect();
+		this.addListener();
+	}
+
+	connect() { // Connect
+		this._ws = new WebSocket(this.botServerIP);
+		this._ws.binaryType = 'arraybuffer';
+		this._ws.onopen = this.onopen.bind(this);
+		this._ws.onmessage = this.onmessage.bind(this);
+		this._ws.onclose = this.onclose.bind(this);
+		this._ws.onerror = this.onerror.bind(this);
+        if($('#chv2_main-container').length > 0) {
+                var htmlAppend = '';
+                if (window.ServerSwitching == true)
+                {
+                    htmlAppend = '<p class="chv2_signletext">Switching Agar.io server...</p></div><div id="chv2_message_container"></div><div id="chv2_advert"><p></p>';
+                    window.ServerSwitching = false;
+                }
+                else
+                {
+                    htmlAppend = '<p class="chv2_signletext">Connecting to server...</p></div><div id="chv2_message_container"></div><div id="chv2_advert"><p></p>';
+                }
+                document.getElementById('chv2_main-container').innerHTML = htmlAppend;
+        }
+	}
+
+	onopen() {
+        if($('#chv2_main-container').length > 0) {
+                var htmlAppend = '';
+                htmlAppend = '<p class="chv2_signletext">Authentification...</p></div><div id="chv2_message_container"></div><div id="chv2_advert"><p></p>';
+                document.getElementById('chv2_main-container').innerHTML = htmlAppend;
+        }
+        window.xt = true;
+        var e = {};
+        e.action = 17;
+        e.ver = 'p20';
+        this._ws.send(JSON.stringify(e));
+		this.startMoveInterval();
     }
-    return false;
-};
-
-    this.isSplitTarget = function(that, blob, cell) {
-        if (that.canSplit(cell, blob)) {
-            return true;
+	onmessage(msg) {
+        this.lastmessage = JSON.parse(msg.data);
+        refresh();
+	}
+	onclose() {
+        if(window.loadingset != undefined)
+        {
+            delete window.loadingset;
         }
-        return false;
-    };
-
-    this.getTimeToRemerge = function(mass){
-        return Math.max(30, Math.floor(mass*0.02));
-        //return ((mass*0.02) + 30);
-    };
-
-    this.separateListBasedOnFunction = function(that, listToUse, blob) {
-        var foodElementList = [];
-        var threatList = [];
-        var virusList = [];
-        var splitTargetList = [];
-
-        var player = getPlayer();
-
-        var mergeList = [];
-
-        Object.keys(listToUse).forEach(function(element, index) {
-            var isMe = that.isItMe(player, listToUse[element]);
-
-            if (!isMe) {
-                if (that.isFood(blob, listToUse[element]) && listToUse[element].isNotMoving()) {
-                    //IT'S FOOD!
-                    foodElementList.push(listToUse[element]);
-
-
-                } else if (that.isThreat(blob, listToUse[element])) {
-                    //IT'S DANGER!
-                    threatList.push(listToUse[element]);
-                    mergeList.push(listToUse[element]);
-                } else if (that.isVirus(blob, listToUse[element])) {
-                    //IT'S VIRUS!
-                    virusList.push(listToUse[element]);
-                }
-                else if (that.isSplitTarget(that, blob, listToUse[element])) {
-                        drawCircle(listToUse[element].x, listToUse[element].y, listToUse[element].size + 50, 7);
-                        splitTargetList.push(listToUse[element]);
-                        //foodElementList.push(listToUse[element]);
-                        mergeList.push(listToUse[element]);
-                }
-                else {if (that.isVirus(null, listToUse[element])==false) {mergeList.push(listToUse[element]);}
-                    }
-            }/*else if(isMe && (getBlobCount(getPlayer()) > 0)){
-                //Attempt to make the other cell follow the mother one
-                foodElementList.push(listToUse[element]);
-            }*/
-        });
-
-        foodList = [];
-        for (var i = 0; i < foodElementList.length; i++) {
-            foodList.push([foodElementList[i].x, foodElementList[i].y, foodElementList[i].size]);
+        window.xt = false;
+		clearInterval(this.moveInterval);
+		if (!this.serverInUse && !window.serverReady) setTimeout(this.connect.bind(this), 2000);
+	}
+	onerror() {
+        if($('#chv2_main-container').length > 0) {
+                var htmlAppend = '';
+                htmlAppend = '<p class="chv2_signletext">Connecting errored with the server...</p></div><div id="chv2_message_container"></div><div id="chv2_advert"><p></p>';
+                document.getElementById('chv2_main-container').innerHTML = htmlAppend;
         }
-
-        window.log("Merglist length: " +  mergeList.length)
-        //cell merging
-        for (var i = 0; i < mergeList.length; i++) {
-            for (var z = 0; z < mergeList.length; z++) {
-                if (z != i && that.isMerging(mergeList[i], mergeList[z])) { //z != i &&
-                        //found cells that appear to be merging - if they constitute a threat add them to the theatlist
-
-                        //clone us a new cell
-                        var newThreat = {};
-                        var prop;
-
-                        for (prop in mergeList[i]) {
-                            newThreat[prop] = mergeList[i][prop];
-                        }
-
-                        //average distance and sum the size
-                        newThreat.x = (mergeList[i].x + mergeList[z].x)/2;
-                        newThreat.y = (mergeList[i].y + mergeList[z].y)/2;
-                        newThreat.size = (mergeList[i].size + mergeList[z].size);
-                        newThreat.nopredict = true;
-                        //check its a threat
-                        if (that.isThreat(blob, newThreat)) {
-                             //IT'S DANGER!
-                            threatList.push(newThreat);
-                        }
-
-                }
+        if(window.loadingset != undefined)
+        {
+            delete window.loadingset;
+        }
+        window.xt = false;
+	}
+	sendMove(xPos, yPos) {
+        var e = {}
+		e.action = 2;
+		e.positionX = xPos;
+		e.positionY = yPos;
+		this.send(JSON.stringify(e));
+	}
+    setPrecisionCoords() {
+        var mouseX = (( (this.clientX - (window.innerWidth / 2) ) / (window.viewScale / this.viewScaleMultiplier )) + window.playerX);
+        var mouseY = (( (this.clientY - (window.innerHeight / 2) ) / (window.viewScale / this.viewScaleMultiplier )) + window.playerY);
+        this.playerAbsoluteX = window.playerX + this.mapOffsetX;
+        this.playerAbsoluteY = window.playerY + this.mapOffsetY;
+        this.mouseAbsoluteX = mouseX + this.mapOffsetX;
+        this.mouseAbsoluteY = mouseY + this.mapOffsetY;
+        $('#chv2_staticmap #pointer').css('left','calc('+Math.floor(((this.playerAbsoluteX + this.mapOffset) / (this.mapOffset * 2)) * 150)+'px - 5px)');
+        $('#chv2_staticmap #pointer').css('top','calc('+Math.floor(((this.playerAbsoluteY + this.mapOffset) / (this.mapOffset * 2)) * 150)+'px - 5px)');
+        $('#chv2_staticmap #pointer2').css('left','calc('+Math.floor(((this.mouseAbsoluteX + this.mapOffset) / (this.mapOffset * 2)) * 150)+'px - 3px)');
+        $('#chv2_staticmap #pointer2').css('top','calc('+Math.floor(((this.mouseAbsoluteY + this.mapOffset) / (this.mapOffset * 2)) * 150)+'px - 3px)');
+    }
+	split() {
+		if (this._ws != undefined && this._ws.readyState == WebSocket.OPEN) this.send(JSON.stringify({action:16}));
+	}
+	eject() {
+		if (this._ws != undefined && this._ws.readyState == WebSocket.OPEN) this.send(JSON.stringify({action:15}));
+	}
+	botmode(mode) {
+		if (this._ws != undefined && this._ws.readyState == WebSocket.OPEN)
+		{
+			var e = {};
+            e.action = 18;
+            e.botmode = mode;
+			this.send(JSON.stringify(e));
+		}
+	}
+	startMoveInterval() {
+		this.moveInterval = setInterval(() => {
+			if (window.playerX && window.playerY && window.coordOffsetFixed && this.clientX && this.clientY)
+            {
+                this.sendMove(((this.clientX - window.innerWidth / 2) / window.viewScale) + window.playerX, ((this.clientY - window.innerHeight / 2) / window.viewScale) + window.playerY);
             }
-        }
-
-        return [foodList, threatList, virusList, splitTargetList];
-    };
-
-    this.getAll = function(blob) {
-        var dotList = [];
-        var player = getPlayer();
-        var interNodes = getMemoryCells();
-
-        dotList = this.separateListBasedOnFunction(this, interNodes, blob);
-
-        return dotList;
-    };
-
-    this.clusterFood = function(foodList, blobSize) {
-        var clusters = [];
-        var addedCluster = false;
-
-        //1: x
-        //2: y
-        //3: size or value
-        //4: Angle, not set here.
-
-        for (var i = 0; i < foodList.length; i++) {
-            for (var j = 0; j < clusters.length; j++) {
-                if (this.computeInexpensiveDistance(foodList[i][0], foodList[i][1], clusters[j][0], clusters[j][1]) < blobSize * 2) {
-                    clusters[j][0] = (foodList[i][0] + clusters[j][0]) / 2;
-                    clusters[j][1] = (foodList[i][1] + clusters[j][1]) / 2;
-                    clusters[j][2] += foodList[i][2];
-                    addedCluster = true;
-                    break;
-                }
+		}, 50);
+	}
+	createBuffer(len) {
+		return new DataView(new ArrayBuffer(len));
+	}
+	send(data) {
+		if (this._ws.readyState !== 1) return;
+		this._ws.send(data, {
+			binary: true
+		});
+	}
+	addListener() {
+		document.addEventListener('mousemove', event => {
+                this.clientX = event.clientX;
+                this.clientY = event.clientY;
+		});
+	}
+}
+window.client = new Client('wss://gamesrv.agarbot.ovh:8443');
+let check = setInterval(() => {
+	if (document.readyState == "complete") {
+		clearInterval(check);
+		setTimeout(() => {
+			new GUITweaker();
+		}, 1500);
+	}
+}, 100);
+function freezeOwnCell(freeze) {
+    if(freeze) {
+        $('.chv2_active_randomcmd p').css('background-color', 'rgba(0,255,0, 0.4)');
+        $('#chv2_freeze_mouse_overlay').css('display', 'block');
+        var evt = document.createEvent("MouseEvents");
+        evt.initMouseEvent("mousemove", true, true, window, 0, Math.floor(window.innerWidth / 2),Math.floor(window.innerHeight / 2),Math.floor(window.innerWidth / 2),Math.floor(window.innerHeight / 2), false, false, false, false, 0, null);
+        document.getElementById('canvas').dispatchEvent(evt);
+    } else {
+        $('.chv2_active_randomcmd p').css('background-color', 'rgba(0,0,0, 0.8)');
+        $('#chv2_freeze_mouse_overlay').css('display', 'none');
+        evt = document.createEvent("MouseEvents");
+        evt.initMouseEvent("mousemove", true, true, window, 0, window.client.clientX, window.client.clientY, window.client.clientX, window.client.clientY, false, false, false, false, 0, null);
+        document.getElementById('canvas').dispatchEvent(evt);
+    }
+}
+    var autofeed_clientfeed = false;
+    var autofeed_botfeed = false;
+    var autofeed_botfeed_firstshot = false;
+    var botModePressed = false;
+    setInterval(function() {
+            if(autofeed_clientfeed == true) {
+                try {
+                    window.core.eject();
+                } catch(e) {}
             }
-            if (!addedCluster) {
-                clusters.push([foodList[i][0], foodList[i][1], foodList[i][2], 0]);
-            }
-            addedCluster = false;
-        }
-        return clusters;
-    };
-
-    this.getAngle = function(x1, y1, x2, y2) {
-        //Handle vertical and horizontal lines.
-
-        if (x1 == x2) {
-            if (y1 < y2) {
-                return 271;
-                //return 89;
+            if(autofeed_botfeed == true) {
+                $('.chv2_active_speedcmd p').css('background-color', 'rgba(0,255,0, 0.4)');
+                try {
+                    window.client.eject();
+                } catch (e) {}
             } else {
-                return 89;
+                $('.chv2_active_speedcmd p').css('background-color', 'rgba(0, 0,0, 0.8)');
             }
-        }
-
-        return (Math.round(Math.atan2(-(y1 - y2), -(x1 - x2)) / Math.PI * 180 + 180));
-    };
-
-    this.slope = function(x1, y1, x2, y2) {
-        var m = (y1 - y2) / (x1 - x2);
-
-        return m;
-    };
-
-    this.slopeFromAngle = function(degree) {
-        if (degree == 270) {
-            degree = 271;
-        } else if (degree == 90) {
-            degree = 91;
-        }
-        return Math.tan((degree - 180) / 180 * Math.PI);
-    };
-
-    //Given two points on a line, finds the slope of a perpendicular line crossing it.
-    this.inverseSlope = function(x1, y1, x2, y2) {
-        var m = this.slope(x1, y1, x2, y2);
-        return (-1) / m;
-    };
-
-    //Given a slope and an offset, returns two points on that line.
-    this.pointsOnLine = function(slope, useX, useY, distance) {
-        var b = useY - slope * useX;
-        var r = Math.sqrt(1 + slope * slope);
-
-        var newX1 = (useX + (distance / r));
-        var newY1 = (useY + ((distance * slope) / r));
-        var newX2 = (useX + ((-distance) / r));
-        var newY2 = (useY + (((-distance) * slope) / r));
-
-        return [
-            [newX1, newY1],
-            [newX2, newY2]
-        ];
-    };
-
-    this.followAngle = function(angle, useX, useY, distance) {
-        var slope = this.slopeFromAngle(angle);
-        var coords = this.pointsOnLine(slope, useX, useY, distance);
-
-        var side = this.mod(angle - 90, 360);
-        if (side < 180) {
-            return coords[1];
-        } else {
-            return coords[0];
-        }
-    };
-
-    //Using a line formed from point a to b, tells if point c is on S side of that line.
-    this.isSideLine = function(a, b, c) {
-        if ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]) > 0) {
-            return true;
-        }
-        return false;
-    };
-
-    //angle range2 is within angle range2
-    //an Angle is a point and a distance between an other point [5, 40]
-    this.angleRangeIsWithin = function(range1, range2) {
-        if (range2[0] == this.mod(range2[0] + range2[1], 360)) {
-            return true;
-        }
-        window.log("r1: " + range1[0] + ", " + range1[1] + " ... r2: " + range2[0] + ", " + range2[1]);
-
-        var distanceFrom0 = this.mod(range1[0] - range2[0], 360);
-        var distanceFrom1 = this.mod(range1[1] - range2[0], 360);
-
-        if (distanceFrom0 < range2[1] && distanceFrom1 < range2[1] && distanceFrom0 < distanceFrom1) {
-            return true;
-        }
-        return false;
-    };
-
-    this.angleRangeIsWithinInverted = function(range1, range2) {
-        var distanceFrom0 = this.mod(range1[0] - range2[0], 360);
-        var distanceFrom1 = this.mod(range1[1] - range2[0], 360);
-
-        if (distanceFrom0 < range2[1] && distanceFrom1 < range2[1] && distanceFrom0 > distanceFrom1) {
-            return true;
-        }
-        return false;
-    };
-
-    this.angleIsWithin = function(angle, range) {
-        var diff = this.mod(this.rangeToAngle(range) - angle, 360);
-        if (diff >= 0 && diff <= range[1]) {
-            return true;
-        }
-        return false;
-    };
-
-    this.rangeToAngle = function(range) {
-        return this.mod(range[0] + range[1], 360);
-    };
-
-    this.anglePair = function(range) {
-        return (range[0] + ", " + this.rangeToAngle(range) + " range: " + range[1]);
-    };
-
-    this.computeAngleRanges = function(blob1, blob2) {
-        var mainAngle = this.getAngle(blob1.x, blob1.y, blob2.x, blob2.y);
-        var leftAngle = this.mod(mainAngle - 90, 360);
-        var rightAngle = this.mod(mainAngle + 90, 360);
-
-        var blob1Left = this.followAngle(leftAngle, blob1.x, blob1.y, blob1.size);
-        var blob1Right = this.followAngle(rightAngle, blob1.x, blob1.y, blob1.size);
-
-        var blob2Left = this.followAngle(rightAngle, blob2.x, blob2.y, blob2.size);
-        var blob2Right = this.followAngle(leftAngle, blob2.x, blob2.y, blob2.size);
-
-        var blob1AngleLeft = this.getAngle(blob2.x, blob2.y, blob1Left[0], blob1Left[1]);
-        var blob1AngleRight = this.getAngle(blob2.x, blob2.y, blob1Right[0], blob1Right[1]);
-
-        var blob2AngleLeft = this.getAngle(blob1.x, blob1.y, blob2Left[0], blob2Left[1]);
-        var blob2AngleRight = this.getAngle(blob1.x, blob1.y, blob2Right[0], blob2Right[1]);
-
-        var blob1Range = this.mod(blob1AngleRight - blob1AngleLeft, 360);
-        var blob2Range = this.mod(blob2AngleRight - blob2AngleLeft, 360);
-
-        var tempLine = this.followAngle(blob2AngleLeft, blob2Left[0], blob2Left[1], 400);
-        //drawLine(blob2Left[0], blob2Left[1], tempLine[0], tempLine[1], 0);
-
-        if ((blob1Range / blob2Range) > 1) {
-            drawPoint(blob1Left[0], blob1Left[1], 3, "");
-            drawPoint(blob1Right[0], blob1Right[1], 3, "");
-            drawPoint(blob1.x, blob1.y, 3, "" + blob1Range + ", " + blob2Range + " R: " + (Math.round((blob1Range / blob2Range) * 1000) / 1000));
-        }
-
-        //drawPoint(blob2.x, blob2.y, 3, "" + blob1Range);
-    };
-
-    this.debugAngle = function(angle, text) {
-        var player = getPlayer();
-        var line1 = this.followAngle(angle, player[0].x, player[0].y, 300);
-        drawLine(player[0].x, player[0].y, line1[0], line1[1], 5);
-        drawPoint(line1[0], line1[1], 5, "" + text);
-    };
-
-    //TODO: Don't let this function do the radius math.
-    this.getEdgeLinesFromPoint = function(blob1, blob2, radius) {
-        var px = blob1.x;
-        var py = blob1.y;
-
-        var cx = blob2.x;
-        var cy = blob2.y;
-
-        //var radius = blob2.size;
-
-        /*if (blob2.isVirus()) {
-            radius = blob1.size;
-        } else if(canSplit(blob1, blob2)) {
-            radius += splitDistance;
-        } else {
-            radius += blob1.size * 2;
-        }*/
-
-        var shouldInvert = false;
-
-        var tempRadius = this.computeDistance(px, py, cx, cy);
-        if (tempRadius <= radius) {
-            radius = tempRadius - 5;
-            shouldInvert = true;
-        }
-
-        var dx = cx - px;
-        var dy = cy - py;
-        var dd = Math.sqrt(dx * dx + dy * dy);
-        var a = Math.asin(radius / dd);
-        var b = Math.atan2(dy, dx);
-
-        var t = b - a;
-        var ta = {
-            x: radius * Math.sin(t),
-            y: radius * -Math.cos(t)
-        };
-
-        t = b + a;
-        var tb = {
-            x: radius * -Math.sin(t),
-            y: radius * Math.cos(t)
-        };
-
-        var angleLeft = this.getAngle(cx + ta.x, cy + ta.y, px, py);
-        var angleRight = this.getAngle(cx + tb.x, cy + tb.y, px, py);
-        var angleDistance = this.mod(angleRight - angleLeft, 360);
-
-        /*if (shouldInvert) {
-            var temp = angleLeft;
-            angleLeft = this.mod(angleRight + 180, 360);
-            angleRight = this.mod(temp + 180, 360);
-            angleDistance = this.mod(angleRight - angleLeft, 360);
-        }*/
-
-        return [angleLeft, angleDistance, [cx + tb.x, cy + tb.y],
-            [cx + ta.x, cy + ta.y]
-        ];
-    };
-
-    this.addWall = function(listToUse, blob) {
-        //var mapSizeX = Math.abs(f.getMapStartX - f.getMapEndX);
-        //var mapSizeY = Math.abs(f.getMapStartY - f.getMapEndY);
-        //var distanceFromWallX = mapSizeX/3;
-        //var distanceFromWallY = mapSizeY/3;
-        var distanceFromWallY = 1000;
-        var distanceFromWallX = 1000;
-        if (blob.x < getMapStartX() + distanceFromWallX) {
-            //LEFT
-            window.log("Left");
-            listToUse.push([
-                [115, true],
-                [245, false], this.computeInexpensiveDistance(getMapStartX(), blob.y, blob.x, blob.y)
-            ]);
-            var lineLeft = this.followAngle(115, blob.x, blob.y, 190 + blob.size);
-            var lineRight = this.followAngle(245, blob.x, blob.y, 190 + blob.size);
-            drawLine(blob.x, blob.y, lineLeft[0], lineLeft[1], 5);
-            drawLine(blob.x, blob.y, lineRight[0], lineRight[1], 5);
-            drawArc(lineLeft[0], lineLeft[1], lineRight[0], lineRight[1], blob.x, blob.y, 5);
-        }
-        if (blob.y < getMapStartY() + distanceFromWallY) {
-            //TOP
-            window.log("TOP");
-            listToUse.push([
-                [205, true],
-                [335, false], this.computeInexpensiveDistance(blob.x, getMapStartY(), blob.x, blob.y)
-            ]);
-            var lineLeft = this.followAngle(205, blob.x, blob.y, 190 + blob.size);
-            var lineRight = this.followAngle(335, blob.x, blob.y, 190 + blob.size);
-            drawLine(blob.x, blob.y, lineLeft[0], lineLeft[1], 5);
-            drawLine(blob.x, blob.y, lineRight[0], lineRight[1], 5);
-            drawArc(lineLeft[0], lineLeft[1], lineRight[0], lineRight[1], blob.x, blob.y, 5);
-        }
-        if (blob.x > getMapEndX() - distanceFromWallX) {
-            //RIGHT
-            window.log("RIGHT");
-            listToUse.push([
-                [295, true],
-                [65, false], this.computeInexpensiveDistance(getMapEndX(), blob.y, blob.x, blob.y)
-            ]);
-            var lineLeft = this.followAngle(295, blob.x, blob.y, 190 + blob.size);
-            var lineRight = this.followAngle(65, blob.x, blob.y, 190 + blob.size);
-            drawLine(blob.x, blob.y, lineLeft[0], lineLeft[1], 5);
-            drawLine(blob.x, blob.y, lineRight[0], lineRight[1], 5);
-            drawArc(lineLeft[0], lineLeft[1], lineRight[0], lineRight[1], blob.x, blob.y, 5);
-        }
-        if (blob.y > getMapEndY() - distanceFromWallY) {
-            //BOTTOM
-            window.log("BOTTOM");
-            listToUse.push([
-                [25, true],
-                [155, false], this.computeInexpensiveDistance(blob.x, getMapEndY(), blob.x, blob.y)
-            ]);
-            var lineLeft = this.followAngle(25, blob.x, blob.y, 190 + blob.size);
-            var lineRight = this.followAngle(155, blob.x, blob.y, 190 + blob.size);
-            drawLine(blob.x, blob.y, lineLeft[0], lineLeft[1], 5);
-            drawLine(blob.x, blob.y, lineRight[0], lineRight[1], 5);
-            drawArc(lineLeft[0], lineLeft[1], lineRight[0], lineRight[1], blob.x, blob.y, 5);
-        }
-        return listToUse;
-    };
-
-    //listToUse contains angles in the form of [angle, boolean].
-    //boolean is true when the range is starting. False when it's ending.
-    //range = [[angle1, true], [angle2, false]]
-
-    this.getAngleIndex = function(listToUse, angle) {
-        if (listToUse.length === 0) {
-            return 0;
-        }
-
-        for (var i = 0; i < listToUse.length; i++) {
-            if (angle <= listToUse[i][0]) {
-                return i;
+    }, 200);
+    //Register key events
+    var iCanMove = false;
+    var splitPressed = false;
+    var freezePressed = false;
+    $(document).keyup(function(e){
+        if(e.keyCode == 88) {
+            splitPressed = false;
+        } else if(e.keyCode == 86) {
+            if(iCanMove == true) {
+                iCanMove = false;
+                freezeOwnCell(false);
+            } else {
+                iCanMove = true;
+                freezeOwnCell(true);
             }
-        }
-
-        return listToUse.length;
-    };
-
-    this.addAngle = function(listToUse, range) {
-        //#1 Find first open element
-        //#2 Try to add range1 to the list. If it is within other range, don't add it, set a boolean.
-        //#3 Try to add range2 to the list. If it is withing other range, don't add it, set a boolean.
-
-        //TODO: Only add the new range at the end after the right stuff has been removed.
-
-        var newListToUse = listToUse.slice();
-
-        var startIndex = 1;
-
-        if (newListToUse.length > 0 && !newListToUse[0][1]) {
-            startIndex = 0;
-        }
-
-        var startMark = this.getAngleIndex(newListToUse, range[0][0]);
-        var startBool = this.mod(startMark, 2) != startIndex;
-
-        var endMark = this.getAngleIndex(newListToUse, range[1][0]);
-        var endBool = this.mod(endMark, 2) != startIndex;
-
-        var removeList = [];
-
-        if (startMark != endMark) {
-            //Note: If there is still an error, this would be it.
-            var biggerList = 0;
-            if (endMark == newListToUse.length) {
-                biggerList = 1;
+        } else if(e.keyCode == 67) {//FEED
+            autofeed_botfeed = false;
+        } else if(e.keyCode == 65) { //Minimap show / hide
+            if($('#chv2_staticmap').css('display') == 'block') {
+                $('#chv2_staticmap').css('display', 'none');
+                $('#chv2_staticmaphide').css('display', 'block');
+            } else {
+                $('#chv2_staticmap').css('display', 'block');
+                $('#chv2_staticmaphide').css('display', 'none');
             }
-
-            for (var i = startMark; i < startMark + this.mod(endMark - startMark, newListToUse.length + biggerList); i++) {
-                removeList.push(this.mod(i, newListToUse.length));
-            }
-        } else if (startMark < newListToUse.length && endMark < newListToUse.length) {
-            var startDist = this.mod(newListToUse[startMark][0] - range[0][0], 360);
-            var endDist = this.mod(newListToUse[endMark][0] - range[1][0], 360);
-
-            if (startDist < endDist) {
-                for (var i = 0; i < newListToUse.length; i++) {
-                    removeList.push(i);
+        } else if(e.keyCode == 87) { //Autofeed cotÃ© client
+            autofeed_clientfeed = false;
+        }
+        else if(e.keyCode == 77) {
+			botModePressed = false;
+		}
+    });
+    $(document).keydown(function(e){ //Press key
+        if(e.keyCode == 88) { //SPLIT
+            try {
+                if(splitPressed == false) {
+                    splitPressed = true;
+                    window.client.split();
+                    $('.chv2_active_followcmd p').css('background-color', 'rgba(0,255,0, 0.4)');
+                    setTimeout(function() {
+                        $('.chv2_active_followcmd p').css('background-color', 'rgba(0, 0,0, 0.8)');
+                    }, 100);
                 }
-            }
+            } catch(osef) {}
+        } else if(e.keyCode == 67) { //C = Feed
+            autofeed_botfeed = true;
+        } else if(e.keyCode == 87) { //Autofeed cotÃ© client
+            autofeed_clientfeed = true;
         }
-
-        removeList.sort(function(a, b){return b-a;});
-
-        for (var i = 0; i < removeList.length; i++) {
-            newListToUse.splice(removeList[i], 1);
+        else if(e.keyCode == 77) {
+			if (botModePressed == false && window.botmodeChange == true && window.xt)
+			{
+				botModePressed = true;
+				$('.chv2_active_botmode p').css('background-color', 'rgba(0,255,0, 0.4)');
+                    setTimeout(function() {
+                        $('.chv2_active_botmode p').css('background-color', 'rgba(0, 0,0, 0.5)');
+                }, 100);
+				if (window.botmode == 0)
+				{
+					window.botmode = 1;
+					window.client.botmode(1);
+					$('#botmode').html('<span id="botmode">MASS X2</span>');
+				}
+				else if (window.botmode == 1)
+				{
+					window.botmode = 2;
+					window.client.botmode(2);
+					$('#botmode').html('<span id="botmode">MASS X4</span>');
+				}
+				else if (window.botmode == 2)
+				{
+					window.botmode = 10;
+					window.client.botmode(10);
+					$('#botmode').html('<span id="botmode">FEEDER</span>');
+				}
+				else if (window.botmode == 10)
+				{
+					window.botmode = 0;
+					window.client.botmode(0);
+					$('#botmode').html('<span id="botmode">NORMAL</span>');
+				}
+			}
         }
-
-        if (startBool) {
-            newListToUse.splice(this.getAngleIndex(newListToUse, range[0][0]), 0, range[0]);
-        }
-        if (endBool) {
-            newListToUse.splice(this.getAngleIndex(newListToUse, range[1][0]), 0, range[1]);
-        }
-
-        return newListToUse;
-    };
-
-    this.getAngleRange = function(blob1, blob2, index, radius) {
-        var angleStuff = this.getEdgeLinesFromPoint(blob1, blob2, radius);
-
-        var leftAngle = angleStuff[0];
-        var rightAngle = this.rangeToAngle(angleStuff);
-        var difference = angleStuff[1];
-
-        drawPoint(angleStuff[2][0], angleStuff[2][1], 3, "");
-        drawPoint(angleStuff[3][0], angleStuff[3][1], 3, "");
-
-        window.log("Adding badAngles: " + leftAngle + ", " + rightAngle + " diff: " + difference);
-
-        var lineLeft = this.followAngle(leftAngle, blob1.x, blob1.y, 150 + blob1.size - index * 10);
-        var lineRight = this.followAngle(rightAngle, blob1.x, blob1.y, 150 + blob1.size - index * 10);
-
-        if (blob2.isVirus()) {
-            drawLine(blob1.x, blob1.y, lineLeft[0], lineLeft[1], 6);
-            drawLine(blob1.x, blob1.y, lineRight[0], lineRight[1], 6);
-            drawArc(lineLeft[0], lineLeft[1], lineRight[0], lineRight[1], blob1.x, blob1.y, 6);
-        } else if(getCells().hasOwnProperty(blob2.id)) {
-            drawLine(blob1.x, blob1.y, lineLeft[0], lineLeft[1], 0);
-            drawLine(blob1.x, blob1.y, lineRight[0], lineRight[1], 0);
-            drawArc(lineLeft[0], lineLeft[1], lineRight[0], lineRight[1], blob1.x, blob1.y, 0);
-        } else {
-            drawLine(blob1.x, blob1.y, lineLeft[0], lineLeft[1], 3);
-            drawLine(blob1.x, blob1.y, lineRight[0], lineRight[1], 3);
-            drawArc(lineLeft[0], lineLeft[1], lineRight[0], lineRight[1], blob1.x, blob1.y, 3);
-        }
-
-        return [leftAngle, difference];
-    };
-
-    //Given a list of conditions, shift the angle to the closest available spot respecting the range given.
-    this.shiftAngle = function(listToUse, angle, range) {
-        //TODO: shiftAngle needs to respect the range! DONE?
-        for (var i = 0; i < listToUse.length; i++) {
-            if (this.angleIsWithin(angle, listToUse[i])) {
-                window.log("Shifting needed!");
-
-                var angle1 = listToUse[i][0];
-                var angle2 = this.rangeToAngle(listToUse[i]);
-
-                var dist1 = this.mod(angle - angle1, 360);
-                var dist2 = this.mod(angle2 - angle, 360);
-
-                if (dist1 < dist2) {
-                    if (this.angleIsWithin(angle1, range)) {
-                        return angle1;
-                    } else {
-                        return angle2;
-                    }
-                } else {
-                    if (this.angleIsWithin(angle2, range)) {
-                        return angle2;
-                    } else {
-                        return angle1;
-                    }
+    });
+if(window.location.origin == "https://agar.io") {
+    var observer = new MutationObserver(function(mutations){
+        mutations.forEach(function(mutation) {
+            mutation.addedNodes.forEach(function(node) {
+                if (/agario\.core\.js/i.test(node.src)){
+                    observer.disconnect();
+                    node.parentNode.removeChild(node);
+                    var request = new XMLHttpRequest();
+                    request.open("get", node.src, true);
+                    request.send();
+                    request.onload = function(){
+                        var coretext = this.responseText;
+                        var newscript = document.createElement("script");
+                        newscript.type = "text/javascript";
+                        newscript.async = true;
+                        newscript.textContent = editCore(coretext);
+                        document.body.appendChild(newscript);
+                        }
                 }
-            }
-        }
-        window.log("No Shifting Was needed!");
-        return angle;
-    };
-
-    /**
-     * This is the main bot logic. This is called quite often.
-     * @return A 2 dimensional array with coordinates for every cells.  [[x, y], [x, y]]
-     */
-    this.mainLoop = function() {
-        var player = getPlayer();
-        var interNodes = getMemoryCells();
-
-        if ( /*!toggle*/ 1) {
-            //The following code converts the mouse position into an
-            //absolute game coordinate.
-            var useMouseX = screenToGameX(getMouseX());
-            var useMouseY = screenToGameY(getMouseY());
-            tempPoint = [useMouseX, useMouseY, 1];
-
-            //The current destination that the cells were going towards.
-            var tempMoveX = getPointX();
-            var tempMoveY = getPointY();
-
-            drawLine(getX() - (1920 / 2) / getZoomlessRatio(), getY() - (1080 / 2) / getZoomlessRatio(), getX() + (1920 / 2) / getZoomlessRatio(), getY() - (1080 / 2) / getZoomlessRatio(), 7);
-            drawLine(getX() - (1920 / 2) / getZoomlessRatio(), getY() + (1080 / 2) / getZoomlessRatio(), getX() + (1920 / 2) / getZoomlessRatio(), getY() + (1080 / 2) / getZoomlessRatio(), 7);
-            drawLine(getX() - (1920 / 2) / getZoomlessRatio(), getY() - (1080 / 2) / getZoomlessRatio(), getX() - (1920 / 2) / getZoomlessRatio(), getY() + (1080 / 2) / getZoomlessRatio(), 7);
-            drawLine(getX() + (1920 / 2) / getZoomlessRatio(), getY() - (1080 / 2) / getZoomlessRatio(), getX() + (1920 / 2) / getZoomlessRatio(), getY() + (1080 / 2) / getZoomlessRatio(), 7);
-
-            //This variable will be returned at the end.
-            //It will contain the destination choices for all the cells.
-            //BTW!!! ERROR ERROR ABORT MISSION!!!!!!! READ BELOW -----------
-            //
-            //SINCE IT'S STUPID NOW TO ASK EACH CELL WHERE THEY WANT TO GO,
-            //THE BOT SHOULD SIMPLY PICK ONE AND THAT'S IT, I MEAN WTF....
-            var destinationChoices = []; //destination, size, danger
-
-            //Just to make sure the player is alive.
-            if (player.length > 0) {
-
-                //Loop through all the player's cells.
-                for (var k = 0; k < player.length; k++) {
-                    if (true) {
-                        drawPoint(player[k].x, player[k].y + player[k].size, 0, "" + (getLastUpdate() - player[k].birth) + " / " + parseInt((30000 + (player[k].birthMass * 57) - (getLastUpdate() - player[k].birth))) + " / " + player[k].birthMass);
-                    }
-                }
-
-
-                //Loops only for one cell for now.
-                for (var k = 0; /*k < player.length*/ k < 1; k++) {
-
-                    window.log("Working on blob: " + k);
-
-                    drawCircle(player[k].x, player[k].y, player[k].size + this.splitDistance, 5);
-                    //drawPoint(player[0].x, player[0].y - player[0].size, 3, "" + Math.floor(player[0].x) + ", " + Math.floor(player[0].y));
-
-                    //var allDots = processEverything(interNodes);
-
-                    //loop through everything that is on the screen and
-                    //separate everything in it's own category.
-                    var allIsAll = this.getAll(player[k]);
-
-                    //The food stored in element 0 of allIsAll
-                    var allPossibleFood = allIsAll[0];
-                    //The threats are stored in element 1 of allIsAll
-                    var allPossibleThreats = allIsAll[1];
-                    //The viruses are stored in element 2 of allIsAll
-                    var allPossibleViruses = allIsAll[2];
-
-                    //The bot works by removing angles in which it is too
-                    //dangerous to travel towards to.
-                    var badAngles = [];
-                    var obstacleList = [];
-
-                    var isSafeSpot = true;
-                    var isMouseSafe = true;
-
-                    var clusterAllFood = this.clusterFood(allPossibleFood, player[k].size);
-
-                    window.log("Looking for enemies!");
-
-                    //Loop through all the cells that were identified as threats.
-                    for (var i = 0; i < allPossibleThreats.length; i++) {
-
-                        var enemyDistance = this.computeDistance(allPossibleThreats[i].x, allPossibleThreats[i].y, player[k].x, player[k].y, allPossibleThreats[i].size);
-
-                        allPossibleThreats[i].enemyDist = enemyDistance;
-                    }
-
-                    /*allPossibleThreats.sort(function(a, b){
-                        return a.enemyDist-b.enemyDist;
-                    })*/
-
-                    for (var i = 0; i < allPossibleThreats.length; i++) {
-
-                        var enemyDistance = this.computeDistance(allPossibleThreats[i].x, allPossibleThreats[i].y, player[k].x, player[k].y);
-
-                        var splitDangerDistance = allPossibleThreats[i].size + this.splitDistance + 150;
-
-                        var normalDangerDistance = allPossibleThreats[i].size + 150;
-
-                        var shiftDistance = player[k].size;
-
-                        window.log("Found distance.");
-
-                        var enemyCanSplit = this.canSplit(player[k], allPossibleThreats[i]);
-                        var secureDistance = (enemyCanSplit ? splitDangerDistance : normalDangerDistance);
-
-                        for (var j = clusterAllFood.length - 1; j >= 0 ; j--) {
-                            if (this.computeDistance(allPossibleThreats[i].x, allPossibleThreats[i].y, clusterAllFood[j][0], clusterAllFood[j][1]) < secureDistance + shiftDistance)
-                                clusterAllFood.splice(j, 1);
-                        }
-
-                        window.log("Removed some food.");
-
-                        if (enemyCanSplit) {
-                            drawCircle(allPossibleThreats[i].x, allPossibleThreats[i].y, splitDangerDistance, 0);
-                            drawCircle(allPossibleThreats[i].x, allPossibleThreats[i].y, splitDangerDistance + shiftDistance, 6);
-                        } else {
-                            drawCircle(allPossibleThreats[i].x, allPossibleThreats[i].y, normalDangerDistance, 3);
-                            drawCircle(allPossibleThreats[i].x, allPossibleThreats[i].y, normalDangerDistance + shiftDistance, 6);
-                        }
-
-                        if (allPossibleThreats[i].danger && getLastUpdate() - allPossibleThreats[i].dangerTimeOut > 1000) {
-
-                            allPossibleThreats[i].danger = false;
-                        }
-
-                        /*if ((enemyCanSplit && enemyDistance < splitDangerDistance) ||
-                            (!enemyCanSplit && enemyDistance < normalDangerDistance)) {
-
-                            allPossibleThreats[i].danger = true;
-                            allPossibleThreats[i].dangerTimeOut = f.getLastUpdate();
-                        }*/
-
-                        window.log("Figured out who was important.");
-
-                        if ((enemyCanSplit && enemyDistance < splitDangerDistance) || (enemyCanSplit && allPossibleThreats[i].danger)) {
-
-                            badAngles.push(this.getAngleRange(player[k], allPossibleThreats[i], i, splitDangerDistance).concat(allPossibleThreats[i].enemyDist));
-
-                        } else if ((!enemyCanSplit && enemyDistance < normalDangerDistance) || (!enemyCanSplit && allPossibleThreats[i].danger)) {
-
-                            badAngles.push(this.getAngleRange(player[k], allPossibleThreats[i], i, normalDangerDistance).concat(allPossibleThreats[i].enemyDist));
-
-                        } else if (enemyCanSplit && enemyDistance < splitDangerDistance + shiftDistance) {
-                            var tempOb = this.getAngleRange(player[k], allPossibleThreats[i], i, splitDangerDistance + shiftDistance);
-                            var angle1 = tempOb[0];
-                            var angle2 = this.rangeToAngle(tempOb);
-
-                            obstacleList.push([[angle1, true], [angle2, false]]);
-                        } else if (!enemyCanSplit && enemyDistance < normalDangerDistance + shiftDistance) {
-                            var tempOb = this.getAngleRange(player[k], allPossibleThreats[i], i, normalDangerDistance + shiftDistance);
-                            var angle1 = tempOb[0];
-                            var angle2 = this.rangeToAngle(tempOb);
-
-                            obstacleList.push([[angle1, true], [angle2, false]]);
-                        }
-                        window.log("Done with enemy: " + i);
-                    }
-
-                    window.log("Done looking for enemies!");
-
-                    var goodAngles = [];
-                    var stupidList = [];
-
-                    for (var i = 0; i < allPossibleViruses.length; i++) {
-                        if (player[k].size < allPossibleViruses[i].size) {
-                            drawCircle(allPossibleViruses[i].x, allPossibleViruses[i].y, allPossibleViruses[i].size + 10, 3);
-                            drawCircle(allPossibleViruses[i].x, allPossibleViruses[i].y, allPossibleViruses[i].size * 2, 6);
-
-                        } else {
-                            drawCircle(allPossibleViruses[i].x, allPossibleViruses[i].y, player[k].size + 50, 3);
-                            drawCircle(allPossibleViruses[i].x, allPossibleViruses[i].y, player[k].size * 2, 6);
-                        }
-                    }
-
-                    for (var i = 0; i < allPossibleViruses.length; i++) {
-                        var virusDistance = this.computeDistance(allPossibleViruses[i].x, allPossibleViruses[i].y, player[k].x, player[k].y);
-                        if (player[k].size < allPossibleViruses[i].size) {
-                            if (virusDistance < (allPossibleViruses[i].size * 2)) {
-                                var tempOb = this.getAngleRange(player[k], allPossibleViruses[i], i, allPossibleViruses[i].size + 10);
-                                var angle1 = tempOb[0];
-                                var angle2 = this.rangeToAngle(tempOb);
-                                obstacleList.push([[angle1, true], [angle2, false]]);
-                            }
-                        } else {
-                            if (virusDistance < (player[k].size * 2)) {
-                                var tempOb = this.getAngleRange(player[k], allPossibleViruses[i], i, player[k].size + 50);
-                                var angle1 = tempOb[0];
-                                var angle2 = this.rangeToAngle(tempOb);
-                                obstacleList.push([[angle1, true], [angle2, false]]);
-                            }
-                        }
-                    }
-
-                    if (badAngles.length > 0) {
-                        //NOTE: This is only bandaid wall code. It's not the best way to do it.
-                        stupidList = this.addWall(stupidList, player[k]);
-                    }
-
-                    for (var i = 0; i < badAngles.length; i++) {
-                        var angle1 = badAngles[i][0];
-                        var angle2 = this.rangeToAngle(badAngles[i]);
-                        stupidList.push([[angle1, true], [angle2, false], badAngles[i][2]]);
-                    }
-
-                    //stupidList.push([[45, true], [135, false]]);
-                    //stupidList.push([[10, true], [200, false]]);
-
-                    stupidList.sort(function(a, b){
-                        window.log("Distance: " + a[2] + ", " + b[2]);
-                        return a[2]-b[2];
-                    });
-
-                    window.log("Added random noob stuff.");
-
-                    var sortedInterList = [];
-                    var sortedObList = [];
-
-                    for (var i = 0; i < stupidList.length; i++) {
-                        window.log("Adding to sorted: " + stupidList[i][0][0] + ", " + stupidList[i][1][0]);
-                        var tempList = this.addAngle(sortedInterList, stupidList[i]);
-
-                        if (tempList.length === 0) {
-                            window.log("MAYDAY IT'S HAPPENING!");
-                            break;
-                        } else {
-                            sortedInterList = tempList;
-                        }
-                    }
-
-                    for (var i = 0; i < obstacleList.length; i++) {
-                        sortedObList = this.addAngle(sortedObList, obstacleList[i]);
-
-                        if (sortedObList.length === 0) {
-                            break;
-                        }
-                    }
-
-                    var offsetI = 0;
-                    var obOffsetI = 1;
-
-                    if (sortedInterList.length > 0 && sortedInterList[0][1]) {
-                        offsetI = 1;
-                    }
-                    if (sortedObList.length > 0 && sortedObList[0][1]) {
-                        obOffsetI = 0;
-                    }
-
-                    var goodAngles = [];
-                    var obstacleAngles = [];
-
-                    for (var i = 0; i < sortedInterList.length; i += 2) {
-                        var angle1 = sortedInterList[this.mod(i + offsetI, sortedInterList.length)][0];
-                        var angle2 = sortedInterList[this.mod(i + 1 + offsetI, sortedInterList.length)][0];
-                        var diff = this.mod(angle2 - angle1, 360);
-                        goodAngles.push([angle1, diff]);
-                    }
-
-                    for (var i = 0; i < sortedObList.length; i += 2) {
-                        var angle1 = sortedObList[this.mod(i + obOffsetI, sortedObList.length)][0];
-                        var angle2 = sortedObList[this.mod(i + 1 + obOffsetI, sortedObList.length)][0];
-                        var diff = this.mod(angle2 - angle1, 360);
-                        obstacleAngles.push([angle1, diff]);
-                    }
-
-                    for (var i = 0; i < goodAngles.length; i++) {
-                        var line1 = this.followAngle(goodAngles[i][0], player[k].x, player[k].y, 100 + player[k].size);
-                        var line2 = this.followAngle(this.mod(goodAngles[i][0] + goodAngles[i][1], 360), player[k].x, player[k].y, 100 + player[k].size);
-                        drawLine(player[k].x, player[k].y, line1[0], line1[1], 1);
-                        drawLine(player[k].x, player[k].y, line2[0], line2[1], 1);
-
-                        drawArc(line1[0], line1[1], line2[0], line2[1], player[k].x, player[k].y, 1);
-
-                        //drawPoint(player[0].x, player[0].y, 2, "");
-
-                        drawPoint(line1[0], line1[1], 0, "" + i + ": 0");
-                        drawPoint(line2[0], line2[1], 0, "" + i + ": 1");
-                    }
-
-                    for (var i = 0; i < obstacleAngles.length; i++) {
-                        var line1 = this.followAngle(obstacleAngles[i][0], player[k].x, player[k].y, 50 + player[k].size);
-                        var line2 = this.followAngle(this.mod(obstacleAngles[i][0] + obstacleAngles[i][1], 360), player[k].x, player[k].y, 50 + player[k].size);
-                        drawLine(player[k].x, player[k].y, line1[0], line1[1], 6);
-                        drawLine(player[k].x, player[k].y, line2[0], line2[1], 6);
-
-                        drawArc(line1[0], line1[1], line2[0], line2[1], player[k].x, player[k].y, 6);
-
-                        //drawPoint(player[0].x, player[0].y, 2, "");
-
-                        drawPoint(line1[0], line1[1], 0, "" + i + ": 0");
-                        drawPoint(line2[0], line2[1], 0, "" + i + ": 1");
-                    }
-
-                    if (this.toggleFollow && goodAngles.length === 0) {
-                        //This is the follow the mouse mode
-                        var distance = this.computeDistance(player[k].x, player[k].y, tempPoint[0], tempPoint[1]);
-
-                        var shiftedAngle = this.shiftAngle(obstacleAngles, this.getAngle(tempPoint[0], tempPoint[1], player[k].x, player[k].y), [0, 360]);
-
-                        var destination = this.followAngle(shiftedAngle, player[k].x, player[k].y, distance);
-
-                        destinationChoices = destination;
-                        drawLine(player[k].x, player[k].y, destination[0], destination[1], 1);
-                        //tempMoveX = destination[0];
-                        //tempMoveY = destination[1];
-
-                    } else if (goodAngles.length > 0) {
-                        var bIndex = goodAngles[0];
-                        var biggest = goodAngles[0][1];
-                        for (var i = 1; i < goodAngles.length; i++) {
-                            var size = goodAngles[i][1];
-                            if (size > biggest) {
-                                biggest = size;
-                                bIndex = goodAngles[i];
-                            }
-                        }
-                        var perfectAngle = this.mod(bIndex[0] + bIndex[1] / 2, 360);
-
-                        perfectAngle = this.shiftAngle(obstacleAngles, perfectAngle, bIndex);
-
-                        var line1 = this.followAngle(perfectAngle, player[k].x, player[k].y, verticalDistance());
-
-                        destinationChoices = line1;
-                        drawLine(player[k].x, player[k].y, line1[0], line1[1], 7);
-                        //tempMoveX = line1[0];
-                        //tempMoveY = line1[1];
-                    } else if (badAngles.length > 0 && goodAngles.length === 0) {
-                        //When there are enemies around but no good angles
-                        //You're likely screwed. (This should never happen.)
-
-                        window.log("Failed");
-                        destinationChoices = [tempMoveX, tempMoveY];
-                        /*var angleWeights = [] //Put weights on the angles according to enemy distance
-                        for (var i = 0; i < allPossibleThreats.length; i++){
-                            var dist = this.computeDistance(player[k].x, player[k].y, allPossibleThreats[i].x, allPossibleThreats[i].y);
-                            var angle = this.getAngle(allPossibleThreats[i].x, allPossibleThreats[i].y, player[k].x, player[k].y);
-                            angleWeights.push([angle,dist]);
-                        }
-                        var maxDist = 0;
-                        var finalAngle = 0;
-                        for (var i = 0; i < angleWeights.length; i++){
-                            if (angleWeights[i][1] > maxDist){
-                                maxDist = angleWeights[i][1];
-                                finalAngle = this.mod(angleWeights[i][0] + 180, 360);
-                            }
-                        }
-                        var line1 = this.followAngle(finalAngle,player[k].x,player[k].y,f.verticalDistance());
-                        drawLine(player[k].x, player[k].y, line1[0], line1[1], 2);
-                        destinationChoices.push(line1);*/
-                    } else if (clusterAllFood.length > 0) {
-                        for (var i = 0; i < clusterAllFood.length; i++) {
-                            window.log("mefore: " + clusterAllFood[i][2]);
-                            //This is the cost function. Higher is better.
-
-                                var clusterAngle = this.getAngle(clusterAllFood[i][0], clusterAllFood[i][1], player[k].x, player[k].y);
-
-                                clusterAllFood[i][2] = clusterAllFood[i][2] * 6 - this.computeDistance(clusterAllFood[i][0], clusterAllFood[i][1], player[k].x, player[k].y);
-                                window.log("Current Value: " + clusterAllFood[i][2]);
-
-                                //(goodAngles[bIndex][1] / 2 - (Math.abs(perfectAngle - clusterAngle)));
-
-                                clusterAllFood[i][3] = clusterAngle;
-
-                                drawPoint(clusterAllFood[i][0], clusterAllFood[i][1], 1, "");
-                                window.log("After: " + clusterAllFood[i][2]);
-                        }
-
-                        var bestFoodI = 0;
-                        var bestFood = clusterAllFood[0][2];
-                        for (var i = 1; i < clusterAllFood.length; i++) {
-                            if (bestFood < clusterAllFood[i][2]) {
-                                bestFood = clusterAllFood[i][2];
-                                bestFoodI = i;
-                            }
-                        }
-
-                        window.log("Best Value: " + clusterAllFood[bestFoodI][2]);
-
-                        var distance = this.computeDistance(player[k].x, player[k].y, clusterAllFood[bestFoodI][0], clusterAllFood[bestFoodI][1]);
-
-                        var shiftedAngle = this.shiftAngle(obstacleAngles, this.getAngle(clusterAllFood[bestFoodI][0], clusterAllFood[bestFoodI][1], player[k].x, player[k].y), [0, 360]);
-
-                        var destination = this.followAngle(shiftedAngle, player[k].x, player[k].y, distance);
-
-                        destinationChoices = destination;
-                        //tempMoveX = destination[0];
-                        //tempMoveY = destination[1];
-                        drawLine(player[k].x, player[k].y, destination[0], destination[1], 1);
-                    } else {
-                        //If there are no enemies around and no food to eat.
-                        destinationChoices = [tempMoveX, tempMoveY];
-                    }
-
-                    drawPoint(tempPoint[0], tempPoint[1], tempPoint[2], "");
-                    //drawPoint(tempPoint[0], tempPoint[1], tempPoint[2], "" + Math.floor(this.computeDistance(tempPoint[0], tempPoint[1], I, J)));
-                    //drawLine(tempPoint[0], tempPoint[1], player[0].x, player[0].y, 6);
-                    //window.log("Slope: " + slope(tempPoint[0], tempPoint[1], player[0].x, player[0].y) + " Angle: " + getAngle(tempPoint[0], tempPoint[1], player[0].x, player[0].y) + " Side: " + this.mod(getAngle(tempPoint[0], tempPoint[1], player[0].x, player[0].y) - 90, 360));
-                    tempPoint[2] = 1;
-
-                    window.log("Done working on blob: " + i);
-                }
-
-                //TODO: Find where to go based on destinationChoices.
-                /*var dangerFound = false;
-                for (var i = 0; i < destinationChoices.length; i++) {
-                    if (destinationChoices[i][2]) {
-                        dangerFound = true;
-                        break;
-                    }
-                }
-
-                destinationChoices.sort(function(a, b){return b[1] - a[1]});
-
-                if (dangerFound) {
-                    for (var i = 0; i < destinationChoices.length; i++) {
-                        if (destinationChoices[i][2]) {
-                            tempMoveX = destinationChoices[i][0][0];
-                            tempMoveY = destinationChoices[i][0][1];
-                            break;
-                        }
-                    }
-                } else {
-                    tempMoveX = destinationChoices.peek()[0][0];
-                    tempMoveY = destinationChoices.peek()[0][1];
-                    //window.log("Done " + tempMoveX + ", " + tempMoveY);
-                }*/
-            }
-            window.log("MOVING RIGHT NOW!");
-
-            window.log("______Never lied ever in my life.");
-
-            return destinationChoices;
-        }
-    };
-};
-window.botList.push(new AposBot());
-
-if ( typeof window.updateBotList == 'function' ) {
-    window.updateBotList(); //This function might not exist yet.
-} else {
-    window.log("The launcher is not yet started.");
+            });
+        });
+    });
+    observer.observe(document, {attributes:true, characterData:true, childList:true, subtree:true});
+    function editCore(coretext){
+        coretext = coretext.replace(/([\w$]+\(\d+,\w\[\w>>2\]\|0,(\+\w),(\+\w)\)\|0;[\w$]+\(\d+,\w\[\w>>2\]\|0,\+-(\+\w\[\w\+\d+>>3\]),\+-(\+\w\[\w\+\d+>>3\])\)\|0;)/i,
+                                    '$1 window.viewScale=$2; if (window.coordOffsetFixed) { window.playerX=$4+window.offsetX; window.playerY=$5+window.offsetY;} client.playerX=$4; client.playerY=$5; client.setPrecisionCoords();');
+        coretext = coretext.replace(/(\w\[\w\+(\d+)>>3]=(\w);\w\[\w\+(\d+)>>3]=(\w);\w\[\w\+(\d+)>>3]=(\w);\w\[\w\+(\d+)>>3]=(\w);\w\=\w\+(\d+)\|(\d+);)/i,
+        '$1 function setMapCoords(_0x7e8bx1, _0x7e8bx2, _0x7e8bx3, _0x7e8bx4, _0x7e8bx5, _0x7e8bx6) { if (_0x7e8bx6 - _0x7e8bx5 == 24) { if (_0x7e8bx3 - _0x7e8bx1 > 14E3) { if (_0x7e8bx4 - _0x7e8bx2 > 14E3) { window.offsetX = 7071.067811865476 - _0x7e8bx3; window.offsetY = 7071.067811865476 - _0x7e8bx4; window.minX = _0x7e8bx1;window.minY=_0x7e8bx2;window.maxX=_0x7e8bx3;window.maxY=_0x7e8bx4; window.coordOffsetFixed = true; } } } } setMapCoords($3,$5,$7,$9,$2,$8);');
+        coretext = coretext.replace(/var (\w)=new WebSocket\((\w\(\w\))\);/, 'window.client.currentServer=$2;window.ab = false;var $1=new WebSocket(window.client.currentServer);');
+        coretext = coretext.replace(/c\[h>>2\]=d;d/, 'c\[h>>2\]=d;if(window.ab == false){window.ao = d; window.ab = true;}d');
+        coretext = coretext.replace(/;if\((\w)<1\.0\){/i, ';if(0){');
+        coretext = coretext.replace(/([\w]+\s*=\s*[\w]+\s*\+\s*16\s*\|\s*0;\s*([\w=]+)\s*=\s*\+[\w\[\s*><\]]+;)/, '$1 $2*=0.75;');
+        return coretext;
+    }
 }
